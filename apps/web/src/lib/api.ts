@@ -128,15 +128,56 @@ class APIClient {
   // ── Creators ────────────────────────────────────────────────
 
   async searchCreators(query: string, filters?: Record<string, unknown>) {
+    const params = new URLSearchParams();
+    if (filters) {
+      for (const [key, value] of Object.entries(filters)) {
+        if (value !== undefined && value !== null) {
+          params.set(key, String(value));
+        }
+      }
+    }
+    const queryString = params.toString();
+    const url = `/api/v1/creators/search${queryString ? `?${queryString}` : ''}`;
     return this.request<{
       data: Array<{
-        creator: { creatorId: string; displayName: string; primaryHandle: string; platform: string; followerCount: number; engagementRate: number };
-        profiles: unknown[];
-        enrichment: unknown[];
-        niches: unknown[];
+        creatorId: string;
+        displayName: string;
+        primaryHandle: string;
+        platform: string;
+        followerCount: number;
+        engagementRate: number;
+        _rankingScore: number;
+        _explanation?: Record<string, unknown>;
       }>;
       total: number;
-    }>('POST', '/api/v1/creators/search', { query, filters });
+      page: number;
+      limit: number;
+      meta: { request_id: string };
+    }>('GET', url);
+  }
+
+  async getTrendingCreators(options?: { platform?: string; niche?: string; limit?: number }) {
+    const params = new URLSearchParams();
+    if (options?.platform) params.set('platform', options.platform);
+    if (options?.niche) params.set('niche', options.niche);
+    if (options?.limit) params.set('limit', String(options.limit));
+    const queryString = params.toString();
+    const url = `/api/v1/creators/trending${queryString ? `?${queryString}` : ''}`;
+    return this.request<{
+      data: Array<{
+        creatorId: string;
+        displayName: string;
+        primaryHandle: string;
+        platform: string;
+        followerCount: number;
+        engagementRate: number;
+        primaryNiche: string;
+        trendingScore: number;
+        trendingExplanation: Record<string, number>;
+        trendDirection: 'accelerating' | 'steady' | 'decelerating';
+      }>;
+      meta: { request_id: string; computedAt: string; ttl: number };
+    }>('GET', url);
   }
 
   async getCreator(creatorId: string) {

@@ -68,7 +68,7 @@ export default function AdminLayout({
           }}>
             Workspaces
           </Link>
-          <Link href="/admin/creators" style={{
+          <Link href="/admin/staff" style={{
             display: 'block',
             padding: '10px 12px',
             borderRadius: '6px',
@@ -76,7 +76,7 @@ export default function AdminLayout({
             fontSize: '14px',
             color: '#d1d5db',
           }}>
-            Creators
+            Staff Management
           </Link>
           <Link href="/admin/audit" style={{
             display: 'block',
@@ -97,6 +97,17 @@ export default function AdminLayout({
             color: '#d1d5db',
           }}>
             System Health
+          </Link>
+          <div style={{ borderTop: '1px solid #374151', margin: '12px 0' }} />
+          <Link href="/staff" style={{
+            display: 'block',
+            padding: '10px 12px',
+            borderRadius: '6px',
+            marginBottom: '4px',
+            fontSize: '14px',
+            color: '#60a5fa',
+          }}>
+            Support Panel
           </Link>
         </nav>
 
