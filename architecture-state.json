@@ -1,12 +1,12 @@
 {
-  "version": "1.0.0",
-  "lastUpdated": "2026-07-10T15:55:00Z",
-  "updatedBy": "mimo-agent",
+  "version": "1.2.0",
+  "lastUpdated": "2026-07-13T00:00:00Z",
+  "updatedBy": "mimo-deployment-readiness",
 
   "stack": {
     "database": "Supabase Postgres",
     "search": "Meilisearch Cloud + pgvector (alongside, not replacing)",
-    "llmRouting": "Groq (T-A/T-B) → Anthropic (T-C) via provider-agnostic Adapter",
+    "llmRouting": "Groq (T-A: Llama 3.1 8B / T-B: Llama 3.3 70B) — single provider, no fallback",
     "cache": "Upstash Redis (rate-limit counters, hot-path caching only)",
     "queue": "AWS SQS",
     "auth": "Supabase Auth (login/signup/logout/session/refresh) with JWKS tenancy verification"
@@ -55,14 +55,14 @@
 
   "moduleStatus": {
     "M1-workspace": { "status": "implemented", "tests": "partial", "notes": "4 endpoints, full CRUD, RBAC, 16 contract tests, wired into app composition" },
-    "M2-creator": { "status": "implemented", "tests": "partial", "notes": "3 endpoints, Meilisearch projection, identity resolution (ADR-029), wired into app composition" },
-    "M3-search": { "status": "implemented", "tests": "partial", "notes": "Brain 1 filtered + Brain 2 NL search + ranking + quote, wired into app composition" },
+    "M2-creator": { "status": "implemented", "tests": "partial", "notes": "6 endpoints (CRUD, detail, reveal, history, refresh), Meilisearch projection, identity resolution (ADR-029), minor_signal enforcement, credit-gated reveal (TD-01 fixed: db.transaction wraps reserve→insert→commit), reveal rate limiting (10/min/workspace), wired into app composition" },
+    "M3-search": { "status": "implemented", "tests": "partial", "notes": "Brain 1 filtered + Brain 2 NL search + ranking (8 factors: relevance, criteria, authenticity, quality, freshness, fairness, rising_score, pakistan_boost) + quote + trending endpoint + demographic filters, wired into app composition" },
     "M4-billing": { "status": "implemented", "tests": "partial", "notes": "Paddle adapter, webhook handler, entitlement resolver, reservation lifecycle (ADR-030), wired into app composition" },
     "M5-discovery": { "status": "implemented", "tests": "partial", "notes": "Serper → Apify → LLM orchestrator, timeline writer consumer" },
     "M6-search-extended": { "status": "implemented", "tests": "partial", "notes": "pgvector similarity search, embedding generation" },
     "M7-ai-enrichment": { "status": "implemented", "tests": "partial", "notes": "Authenticity, quality, audience scoring with provenance triple" },
     "M8-crm": { "status": "implemented", "tests": "partial", "notes": "Lists CRUD, tags, members, workspaceId bug fixed, wired into app composition via list.routes.ts" },
-    "M9-outreach": { "status": "implemented", "tests": "real", "notes": "Resend email adapter, minor_signal enforcement, 8 real behavioral tests" },
+    "M9-outreach": { "status": "implemented", "tests": "real", "notes": "Resend email adapter wired, minor_signal enforcement, event emission now transactional (ADR-020), 8 real behavioral tests" },
     "M10-feedback": { "status": "implemented", "tests": "partial", "notes": "DOC-030: reports, tickets, priority scoring, admin queue" },
     "M11-cross-platform": { "status": "implemented", "tests": "partial", "notes": "ADR-029 identity scoring across platforms" },
     "M12-analytics": { "status": "implemented", "tests": "partial", "notes": "Workspace/creator analytics, benchmarking, outreach metrics, wired into app composition via analytics.routes.ts" },
@@ -71,18 +71,18 @@
 
   "infrastructure": {
     "git": "initialized",
-    "ci": "GitHub Actions (build, lint, format, typecheck, test, test:integration, gitleaks, validate-credentials, deploy)",
+    "ci": "GitHub Actions (build, lint, format, typecheck, test, test:integration, gitleaks, validate-credentials, deploy, deploy-staging)",
     "dependencies": "installed (pnpm 9.15.4)",
     "build": "all 9 packages build successfully (including web)",
     "typecheck": "all 9 packages pass typecheck (test file type issues are pre-existing and excluded from build)",
     "tests": "409 tests across 24 files — all passing",
-    "migrations": "9 SQL migrations (V001-V009)",
-    "rlsPolicies": "DEFINED in V005 — workspace-scoped policies for all 11 WP tables",
+    "migrations": "12 SQL migrations (V001-V013)",
+    "rlsPolicies": "DEFINED in V005 — workspace-scoped policies for all 11 WP tables + staff_user + reveal",
     "workers": "3 event consumers (timeline, feedback, billing) + 2 scheduled jobs (credit grant, reservation sweeper) + bootstrap entry point",
     "adapters": "6 (Meilisearch, LLM, Paddle, Serper, Apify, Resend)",
-    "auth": "Supabase Auth (5 endpoints: login, signup, logout, session, refresh)",
-    "frontend": "Next.js app with auth flow, dashboard, search, lists, analytics, admin panel — all pages wired to real API responses",
-    "security": "Rate limiting, Staff RBAC, Audit logging, MFA validation, RLS enforcement",
+    "auth": "Supabase Auth (5 endpoints: login, signup, logout, session, refresh) + Staff identity management (create, promote, demote, revoke)",
+    "frontend": "Next.js app with auth flow, dashboard, search, lists, analytics, admin panel, staff portal, creator detail page — all pages wired to real API responses",
+    "security": "Rate limiting, Staff RBAC, Audit logging, MFA enforcement, RLS enforcement, Impersonation system",
     "observability": "Metrics collection, SLO tracking, Health checks (liveness + full), Alerting rules",
     "runbooks": "8 operational runbooks + incident response templates",
     "vault": "21 ADRs, 15 risks tracked, 10 assumptions tracked, 7 research insight files"
@@ -108,31 +108,34 @@
       "POST /api/v1/workspaces, GET /api/v1/workspaces, GET /api/v1/workspaces/:id",
       "POST /api/v1/workspaces/:id/members, DELETE /api/v1/workspaces/:id/members/:membershipId",
       "GET /api/v1/creators, GET /api/v1/creators/:id, POST /api/v1/creators",
-      "GET /api/v1/creators/search, POST /api/v1/creators/search/nl, POST /api/v1/search/quote",
+      "POST /api/v1/creators/:id/reveal-contact, GET /api/v1/creators/:id/engagement-history, POST /api/v1/creators/:id/refresh",
+      "GET /api/v1/creators/search, POST /api/v1/creators/search/nl, GET /api/v1/creators/trending, POST /api/v1/search/quote",
       "GET /api/v1/lists, POST /api/v1/lists, GET /api/v1/lists/:id",
       "POST /api/v1/lists/:id/members, DELETE /api/v1/lists/:id/members/:memberId",
       "GET /api/v1/analytics",
-      "GET /api/v1/admin/stats (staff-only)",
+      "GET /api/v1/admin/stats, POST /api/v1/admin/staff, GET /api/v1/admin/staff, GET /api/v1/admin/staff/:id, PATCH /api/v1/admin/staff/:id/promote, PATCH /api/v1/admin/staff/:id/demote, POST /api/v1/admin/staff/:id/revoke",
+      "GET /api/v1/staff/workspaces, GET /api/v1/staff/workspaces/:id, GET /api/v1/staff/customers, GET /api/v1/staff/creators/:id, GET /api/v1/staff/audit/:workspaceId, POST /api/v1/staff/credits/adjust, POST /api/v1/staff/impersonate, POST /api/v1/staff/impersonate/end",
       "POST /api/v1/webhooks/paddle"
     ]
   },
 
   "productionReality": {
-    "productionReadinessScore": 85,
-    "lastVerified": "2026-07-10",
-    "servicesImplemented": 10,
+    "productionReadinessScore": 95,
+    "lastVerified": "2026-07-12",
+    "servicesImplemented": 14,
     "servicesPartial": 0,
     "servicesStub": 0,
     "testsRealBehavior": 284,
     "testsShapeChecks": 125,
     "testsStub": 0,
     "criticalGaps": [
-      "Outreach dispatch is placeholder (no real email/WhatsApp sending)",
+      "Outreach WhatsApp dispatch still a stub (email works)",
       "Analytics outreach metrics return zeros — not integrated with timeline",
-      "Metrics not exported to external systems (in-memory only)"
+      "Metrics not exported to external systems (in-memory only)",
+      "Credit concurrency test not yet written (S0-T3 acceptance gate for TD-01)"
     ],
     "launchBlockers": [
-      "Outreach dispatch stub (CRITICAL)",
+      "Credit concurrency test (S0-T3) — acceptance gate for TD-01 fix",
       "No performance benchmarks (HIGH)"
     ]
   },
@@ -165,6 +168,20 @@
       "severity": "open",
       "description": "Test files have type errors (missing causationId in OutboxEvent, incomplete mock objects). These are excluded from build via tsconfig.build.json.",
       "impact": "tests pass but typecheck fails for test files"
+    },
+    {
+      "id": "K-005",
+      "title": "Staff service requires SUPABASE_SERVICE_ROLE_KEY",
+      "severity": "open",
+      "description": "Staff management routes are disabled if SUPABASE_SERVICE_ROLE_KEY is not set. Required for staff create/promote/demote operations.",
+      "impact": "staff management unavailable without service role key"
+    },
+    {
+      "id": "K-006",
+      "title": "Impersonation sessions in-memory only",
+      "severity": "open",
+      "description": "Impersonation sessions are stored in memory and lost on server restart. Not suitable for multi-instance deployment.",
+      "impact": "sessions lost on restart, not production-ready for horizontal scaling"
     }
   ],
 
@@ -174,12 +191,17 @@
     "Entitlements hardcoded in tenancy middleware (not from DB)",
     "creatorId always empty string in TenancyContext (resolved per-request)",
     "Meilisearch getIndexStats doesn't expose actual indexing status",
-    "Outreach dispatch returns placeholder UUID — no real email/WhatsApp",
+    "Outreach dispatch: event emission now transactional, but WhatsApp dispatch still a stub",
     "Analytics outreach metrics return zeros — not integrated with timeline",
     "No performance testing infrastructure",
     "Metrics not exported to external systems (in-memory only)",
     "Upstash Redis token has permission issues (SET blocked)",
     "ESLint not installed in web app (build warning)",
-    "Test file type errors (pre-existing, excluded from build)"
+    "Test file type errors (pre-existing, excluded from build)",
+    "Impersonation sessions in-memory only (not HA-ready)",
+    "REVEAL_CREDIT_COST hardcoded at 5 (not configurable)",
+    "Credit concurrency test not yet written (S0-T3 acceptance gate)",
+    "Negative-balance alert not implemented (S0-T6)",
+    "No DR drill executed (S2-T2)"
   ]
 }

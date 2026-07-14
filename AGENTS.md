@@ -189,3 +189,493 @@ Never load all 29 documents simultaneously. Load: this file, the ADRs relevant t
 - **v2.1** — Added Section 0 stack table, rewrote Section 3 as the Restraint-First Decision Order, added folder-structure tracking to Section 8.
 - **v2.0** — Full rewrite following the architecture review, ADR-029/030/031, and DOC-019 security addendum.
 - **v0.1** — Initial scaffold, written before any of the 29 documents existed.
+
+---
+
+## 14. Verification Intelligence — Reality Over Intent
+
+The agent must verify system behavior, not trust implementation claims, documentation, or visual appearance.
+
+A feature is not complete because:
+- the code compiles
+- tests pass
+- the UI renders
+- the API returns 200
+- documentation says it exists
+
+A feature is complete only when the entire behavior chain is proven:
+User action → API boundary → authorization → domain logic → persistence → events → async processing → external effects → user-visible result.
+
+---
+
+## 14.1 Evidence-Based Debugging
+
+When investigating defects:
+
+1. Reproduce the issue before proposing a fix.
+2. Capture evidence:
+   - logs
+   - database state
+   - network requests
+   - API responses
+   - browser console output
+   - queue state
+   - event history
+3. Separate:
+   - Observed facts
+   - Likely causes
+   - Required verification
+4. Fix the root cause, not the visible symptom.
+
+Never say:
+"this should work"
+
+Prefer:
+"this was verified by X evidence."
+
+---
+
+## 14.2 State Verification
+
+For every important workflow, verify consistency across layers.
+
+Examples:
+
+Authentication:
+- session exists
+- user identity resolves
+- workspace membership validates
+- RLS permits intended access
+
+Payments:
+- provider event received
+- signature verified
+- ledger updated
+- entitlement changed
+- duplicate events handled
+
+Credits:
+- deduction recorded
+- balance calculated from ledger
+- failed operations do not consume credits
+
+Enrichment:
+- job created
+- worker executes
+- external provider response stored
+- profile state transitions correctly
+
+---
+
+## 14.3 AI-Generated Code Audit
+
+Treat all generated code as untrusted until verified.
+
+Before accepting generated implementation:
+
+Check:
+- Does it match existing architecture?
+- Does it introduce duplicate logic?
+- Does it bypass adapters?
+- Does it weaken security boundaries?
+- Does it create fake completeness?
+- Does it handle failure states?
+
+Generated code should be reviewed as if written by an unfamiliar contributor.
+
+---
+
+## 14.4 Hidden Failure Detection
+
+Actively search for:
+
+- silent failures
+- race conditions
+- stale state
+- incorrect assumptions
+- partial transactions
+- duplicate execution
+- missing retries
+- incorrect cache invalidation
+- authorization gaps
+- misleading UI states
+
+A green test suite is evidence, not proof.
+
+---
+
+## 14.5 Production Reality Check
+
+Before marking production-ready, answer:
+
+"What happens when this fails?"
+
+Document:
+
+- failure mode
+- detection mechanism
+- recovery path
+- user impact
+- operational owner
+
+No critical workflow should depend on an invisible failure.
+
+---
+
+## 14.6 Verification Loop
+
+Every implementation follows:
+
+Understand → Inspect → Change → Test → Observe → Challenge → Accept
+
+The final question before completion:
+
+"How do we know this works in reality, not just in theory?"
+
+
+---
+
+## 15. Mimo Agent Skill Registry
+
+The agent is expected to operate with specialized engineering skills. Skills define capabilities; Sections 1–14 define constraints and authority.
+
+A skill does not override architectural invariants, documentation precedence, security requirements, or decision authority rules.
+
+---
+
+# 15.1 Core Engineering Skills
+
+## Codebase Intelligence
+Ability to:
+- Navigate unfamiliar codebases quickly.
+- Identify module boundaries and ownership.
+- Trace execution flow across frontend, backend, database, workers, and external services.
+- Understand existing patterns before introducing new ones.
+
+## Root Cause Analysis
+Ability to:
+- Investigate failures from evidence.
+- Separate symptoms from causes.
+- Reproduce issues before fixing.
+- Identify systemic problems rather than local patches.
+
+## Change Impact Analysis
+Ability to:
+- Map affected components before modification.
+- Identify downstream dependencies.
+- Predict migration, testing, and operational impact.
+
+## Safe Refactoring
+Ability to:
+- Improve code quality without changing behavior.
+- Reduce duplication.
+- Remove unnecessary complexity.
+- Preserve contracts and invariants.
+
+---
+
+# 15.2 Verification Skills
+
+## Reality Verification
+Ability to verify that implementations work beyond compilation and tests.
+
+Verify:
+
+- User action
+- API request
+- Authentication
+- Authorization
+- Domain processing
+- Database state
+- Events
+- Background jobs
+- External effects
+- Final user-visible result
+
+A passing test is evidence, not proof.
+
+## Production Readiness Review
+Ability to evaluate:
+
+- Failure scenarios
+- Monitoring coverage
+- Rollback capability
+- Security risks
+- Cost implications
+- Operational complexity
+
+## Regression Detection
+Ability to identify:
+
+- Existing behavior changes
+- Contract violations
+- Data corruption risks
+- Hidden side effects
+
+---
+
+# 15.3 SaaS Engineering Skills
+
+## Multi-Tenant SaaS Design
+Ability to reason about:
+
+- Workspace isolation
+- Tenant boundaries
+- Permissions
+- User lifecycle
+- Subscription states
+
+## Billing and Entitlement Systems
+Ability to maintain:
+
+- Credit systems
+- Usage tracking
+- Subscription states
+- Feature access rules
+- Payment provider integrations
+
+Financial state must always be explainable from records.
+
+## Product Engineering
+Ability to connect:
+
+- User problems
+- Product workflows
+- Technical implementation
+- Business outcomes
+
+Avoid building technically impressive features with unclear user value.
+
+---
+
+# 15.4 Database Skills
+
+## PostgreSQL Engineering
+Ability to:
+
+- Design schemas
+- Optimize queries
+- Analyze query plans
+- Design indexes
+- Handle transactions
+- Manage migrations safely
+
+## Data Integrity
+Ability to protect:
+
+- Constraints
+- Referential integrity
+- Immutable records
+- Audit trails
+- Historical accuracy
+
+## Security Database Practices
+Ability to implement:
+
+- Row Level Security
+- Least privilege access
+- Secure queries
+- Tenant isolation verification
+
+---
+
+# 15.5 Backend Engineering Skills
+
+## API Engineering
+Ability to:
+
+- Design stable contracts.
+- Validate inputs.
+- Handle failures explicitly.
+- Maintain backwards compatibility.
+
+## Distributed Systems
+Ability to reason about:
+
+- Async jobs
+- Queues
+- Retries
+- Idempotency
+- Race conditions
+- Event ordering
+
+## External Integration Engineering
+Ability to build resilient adapters for:
+
+- APIs
+- Webhooks
+- Providers
+- Third-party services
+
+Never assume external systems are reliable.
+
+---
+
+# 15.6 Search and Discovery Skills
+
+## Search Engineering
+Ability to improve:
+
+- Retrieval quality
+- Ranking
+- Filtering
+- Query understanding
+- Semantic similarity
+
+Evaluate search by:
+
+- Relevance
+- Coverage
+- Trust
+- User action after results
+
+## Entity Resolution
+Ability to:
+
+- Match identities.
+- Detect duplicates.
+- Handle uncertain matches.
+- Preserve data lineage.
+
+---
+
+# 15.7 Data Intelligence Skills
+
+## Data Quality Engineering
+Ability to maintain:
+
+- Source attribution
+- Freshness tracking
+- Confidence scoring
+- Validation pipelines
+- Accuracy monitoring
+
+Never convert uncertain data into false certainty.
+
+## Fraud Detection
+Ability to evaluate:
+
+- Suspicious patterns
+- Engagement anomalies
+- Authenticity signals
+- Confidence levels
+
+---
+
+# 15.8 AI Engineering Skills
+
+## LLM System Design
+Ability to:
+
+- Design AI workflows.
+- Control hallucinations.
+- Evaluate outputs.
+- Manage cost and latency.
+
+## AI Output Verification
+AI-generated results require:
+
+- Validation rules
+- Confidence scores
+- Human escalation paths when necessary
+
+Models assist decisions; they do not replace system truth.
+
+---
+
+# 15.9 Frontend Engineering Skills
+
+## React and TypeScript
+Ability to:
+
+- Build maintainable components.
+- Preserve type safety.
+- Manage state correctly.
+- Optimize rendering.
+
+## UX Engineering
+Ability to consider:
+
+- User workflows
+- Error states
+- Loading states
+- Accessibility
+- Trust signals
+
+A UI that looks correct but misrepresents system state is a defect.
+
+---
+
+# 15.10 Infrastructure Skills
+
+## Production Operations
+Ability to:
+
+- Debug deployments.
+- Understand environments.
+- Monitor services.
+- Investigate incidents.
+
+## Observability
+Ability to implement:
+
+- Structured logs
+- Metrics
+- Tracing
+- Alerts
+- Operational dashboards
+
+Systems should explain their own failures.
+
+---
+
+# 15.11 Security Skills
+
+Ability to perform:
+
+- Threat modeling
+- Permission auditing
+- Authentication review
+- Authorization testing
+- Input validation review
+- Secret management review
+- Abuse prevention analysis
+
+Security boundaries must be verified, not assumed.
+
+---
+
+# 15.12 Mushin Domain Skills
+
+The agent must understand Mushin as:
+
+A creator intelligence platform where trust in data is the core product.
+
+Domain capabilities:
+
+- Influencer discovery workflows
+- Creator profile enrichment
+- Social platform data modeling
+- Campaign workflows
+- Creator scoring
+- Engagement analysis
+- Fraud signals
+- Marketing decision support
+
+Technical correctness alone is insufficient; outputs must be useful to marketers.
+
+---
+
+# 15.13 Skill Selection Rule
+
+Before starting work:
+
+1. Identify the required skills.
+2. Load only relevant context.
+3. Apply the smallest sufficient skill set.
+4. Verify against reality.
+5. Document decisions.
+
+Do not activate complexity without need.
+
+---
