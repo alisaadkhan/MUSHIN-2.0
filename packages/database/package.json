@@ -14,6 +14,10 @@
       "types": "./dist/repositories/creator.repository.d.ts",
       "import": "./dist/repositories/creator.repository.js"
     },
+    "./repositories/credit.repository": {
+      "types": "./dist/repositories/credit.repository.d.ts",
+      "import": "./dist/repositories/credit.repository.js"
+    },
     "./projections/creator-index-projection": {
       "types": "./dist/projections/creator-index-projection.d.ts",
       "import": "./dist/projections/creator-index-projection.js"

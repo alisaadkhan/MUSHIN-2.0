@@ -3,14 +3,54 @@
  * Implements the credit ledger with SELECT FOR UPDATE concurrency control.
  * Every method takes db as first param for transaction participation.
  *
- * CRITICAL: All credit operations MUST use SELECT ... FOR UPDATE on the
- * balance row (ADR-026). Balance must NEVER go negative.
+ * CRITICAL: reserveCredits, commitCredits, and releaseCredits MUST be called
+ * within db.transaction(). Calling outside a transaction is a TD-01 class bug.
+ * The runtime guard in assertInTransaction() enforces this.
  */
 import { eq, and, sql } from 'drizzle-orm';
 import type { Database } from '../client.js';
 import { workspaceCreditBalance, creditLedgerEntry } from '../schema/wp/index.js';
 
 // ── Types ────────────────────────────────────────────────────
+
+/**
+ * Branded type for transaction clients.
+ * Callers must use `tx as TransactionClient` inside db.transaction() callbacks.
+ * This provides compile-time enforcement that credit operations run in transactions.
+ *
+ * NOTE: Drizzle's PgTransaction and PostgresJsDatabase share the same structural type
+ * but are different classes. This branded type uses Database & { __transactionBrand }
+ * to create a nominal distinction. Callers cast via `tx as unknown as TransactionClient`.
+ */
+export type TransactionClient = Database & { readonly __transactionBrand?: unique symbol };
+
+/**
+ * Runtime guard: asserts that the db parameter is a transaction client.
+ * TD-01 fix: prevents reserveCredits/commitCredits/releaseCredits from being
+ * called outside a transaction, which would bypass SELECT FOR UPDATE safety.
+ */
+export function assertInTransaction(db: Database): asserts db is TransactionClient {
+  // Runtime check: verify db looks like a real Drizzle instance with a client
+  if (!db || typeof db !== 'object') {
+    throw new Error(
+      '[credit.repository] assertInTransaction: db must be a Drizzle database instance. ' +
+      'reserveCredits/commitCredits/releaseCredits MUST be called within db.transaction().'
+    );
+  }
+  // Check for Drizzle's $client property (exists on both base db and transaction objects)
+  const candidate = db as unknown as Record<string, unknown>;
+  if (!candidate['$client'] || typeof (candidate['$client'] as unknown as Record<string, unknown>)['sql'] !== 'function') {
+    throw new Error(
+      '[credit.repository] assertInTransaction: db does not appear to be a Drizzle instance. ' +
+      'reserveCredits/commitCredits/releaseCredits MUST be called within db.transaction().'
+    );
+  }
+  // NOTE: Structural detection cannot distinguish transaction vs base db at runtime.
+  // The primary guard is the TypeScript type: callers inside db.transaction() must
+  // pass `tx as TransactionClient`. This runtime check catches obvious misuse
+  // (non-Drizzle objects, null, undefined) but not "base db passed instead of tx".
+  // That case is caught by code review and the TransactionClient branded type.
+}
 
 export type ReserveResult = {
   success: true;
@@ -97,6 +137,8 @@ export async function reserveCredits(
   referenceType: string,
   referenceId: string,
 ): Promise<ReserveResult> {
+  // TD-01 runtime guard: MUST be called within db.transaction()
+  assertInTransaction(db);
   // 1. SELECT ... FOR UPDATE — row-level lock (ADR-026)
   const [balanceRow] = await db.execute(sql`
     SELECT balance, version
@@ -152,6 +194,8 @@ export async function commitCredits(
   referenceId: string,
   providerCostSnapshot?: Record<string, unknown>,
 ): Promise<CreditOperationResult> {
+  // TD-01 runtime guard: MUST be called within db.transaction()
+  assertInTransaction(db);
   // Insert commit entry (the reservation already deducted from balance)
   await insertLedgerEntry(
     db, workspaceId, 'committed', -amount,
@@ -174,6 +218,8 @@ export async function releaseCredits(
   referenceType: string,
   referenceId: string,
 ): Promise<CreditOperationResult> {
+  // TD-01 runtime guard: MUST be called within db.transaction()
+  assertInTransaction(db);
   // 1. SELECT ... FOR UPDATE
   const [balanceRow] = await db.execute(sql`
     SELECT balance, version

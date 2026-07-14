@@ -371,3 +371,45 @@ export const adminReviewQueue = pgTable(
     index('idx_review_queue_workspace').on(table.workspaceId, table.status),
   ],
 );
+
+// ── wp.reveal (Contact Reveal Records) ───────────────────────
+// Tracks workspace-level contact reveals for creators.
+// Per ADR-029: once revealed, no additional charge for same workspace.
+// Per DOC-029: minor_signal creators cannot be revealed.
+
+export const reveal = pgTable(
+  'reveal',
+  {
+    revealId: uuid('reveal_id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull()
+      .references(() => workspace.workspaceId, { onDelete: 'cascade' }),
+    creatorId: uuid('creator_id').notNull(),
+    creditCost: bigint('credit_cost', { mode: 'bigint' }).notNull().default(5n),
+    revealedBy: uuid('revealed_by').notNull(),
+    revealedAt: timestamp('revealed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('uq_reveal_workspace_creator').on(table.workspaceId, table.creatorId),
+    index('idx_reveal_workspace').on(table.workspaceId),
+    index('idx_reveal_creator').on(table.creatorId),
+  ],
+);
+
+// ── wp.staff_user (Staff Identity) ───────────────────────────
+// Staff profile table extending Supabase Auth identity.
+// Staff identities live in a separate auth realm (ADR-011).
+
+export const staffUser = pgTable(
+  'staff_user',
+  {
+    staffUserId: uuid('staff_user_id').primaryKey(),
+    displayName: text('display_name').notNull(),
+    department: text('department'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_staff_user_department').on(table.department),
+  ],
+);
