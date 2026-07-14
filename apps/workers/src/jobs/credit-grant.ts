@@ -4,10 +4,12 @@
  * Scheduled worker that grants monthly credit allowances based on subscription plan.
  * Runs once per month to credit all active workspaces.
  *
- * This is a scheduled task, not an event consumer.
+ * Uses credit.repository.grantCredits() for safe balance updates
+ * with SELECT FOR UPDATE (ADR-026). TD-01 fix: no raw SQL for balance mutations.
  */
 import type { Database } from '@mushin/database';
 import { sql } from 'drizzle-orm';
+import * as creditRepository from '@mushin/database/repositories/credit.repository';
 
 // ── Plan Credit Allowances ───────────────────────────────────
 
@@ -60,24 +62,15 @@ export async function runCreditGrantJob(db: Database): Promise<{
         continue;
       }
 
-      // Grant credits
-      await db.execute(sql`
-        UPDATE wp.workspace_credit_balance
-        SET balance = balance + ${allowance},
-            version = version + 1,
-            updated_at = NOW()
-        WHERE workspace_id = ${workspaceId}
-      `);
-
-      // Record in ledger
-      await db.execute(sql`
-        INSERT INTO wp.credit_ledger_entry (
-          workspace_id, entry_type, amount, period, description
-        ) VALUES (
-          ${workspaceId}, 'allowance_grant', ${allowance}, ${period},
-          ${`Monthly allowance for ${plan} plan`}
-        )
-      `);
+      // Grant credits using repository for safe balance update (ADR-026)
+      await creditRepository.grantCredits(
+        db,
+        workspaceId,
+        BigInt(allowance),
+        'allowance_grant',
+        period,
+        `Monthly allowance for ${plan} plan`,
+      );
 
       granted++;
     } catch (err) {

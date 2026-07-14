@@ -5,10 +5,12 @@
  * Per ADR-030: TTL sweeper is the ONLY release mechanism.
  * Runs every 30 minutes to clean up reservations older than TTL.
  *
- * This is a scheduled task, not an event consumer.
+ * Uses credit.repository.releaseCredits() for safe balance updates
+ * with SELECT FOR UPDATE (ADR-026). TD-01 fix: no raw SQL for balance mutations.
  */
 import type { Database } from '@mushin/database';
 import { sql } from 'drizzle-orm';
+import * as creditRepository from '@mushin/database/repositories/credit.repository';
 
 // ── Configuration ────────────────────────────────────────────
 
@@ -51,24 +53,15 @@ export async function runReservationSweeper(
       const referenceId = row['reference_id'] as string;
 
       try {
-        // Release the reserved credits back to balance
-        await db.execute(sql`
-          UPDATE wp.workspace_credit_balance
-          SET balance = balance + ${Number(amount)},
-              version = version + 1,
-              updated_at = NOW()
-          WHERE workspace_id = ${workspaceId}
-        `);
-
-        // Record release in ledger
-        await db.execute(sql`
-          INSERT INTO wp.credit_ledger_entry (
-            workspace_id, entry_type, amount, reference_type, reference_id, description
-          ) VALUES (
-            ${workspaceId}, 'released', ${Number(amount)}, ${referenceType}, ${referenceId},
-            'Reservation expired by TTL sweeper'
-          )
-        `);
+        // Use credit.repository.releaseCredits() for safe balance update
+        // with SELECT FOR UPDATE (ADR-026) — no raw SQL for balance mutations
+        await creditRepository.releaseCredits(
+          db,
+          workspaceId,
+          amount,
+          referenceType,
+          referenceId,
+        );
 
         expired++;
       } catch (err) {
