@@ -174,7 +174,10 @@ export function tenancyMiddleware(config: {
     const entitlements = deriveFromPlan(ws?.workspace.subscriptionPlanId ?? 'free');
 
     // 6. Construct and attach TenancyContext
-    const isStaff = claims['realm'] === 'staff';
+    // Check both top-level and app_metadata for realm (Supabase puts it in app_metadata)
+    const appMeta = claims['app_metadata'] as Record<string, unknown> | undefined;
+    const isStaff = claims['realm'] === 'staff' || appMeta?.['realm'] === 'staff';
+    const staffRole = (claims['role'] ?? appMeta?.['role']) as 'admin' | 'support' | undefined;
 
     const tenancy: TenancyContext = {
       userId,
@@ -188,6 +191,7 @@ export function tenancyMiddleware(config: {
         aud: (claims.aud as string) ?? '',
         exp: claims.exp ?? 0,
         iat: claims.iat ?? 0,
+        role: staffRole,
       },
     };
 

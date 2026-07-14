@@ -15,6 +15,8 @@
 import type { Context, Next } from 'hono';
 import { createLogger } from '@mushin/shared';
 import { validateAuditRecord, type AuditRecord, type AuditAction } from '@mushin/shared';
+import type { Database } from '@mushin/database';
+import { auditLog as auditLogTable } from '@mushin/database';
 
 const logger = createLogger('audit');
 
@@ -22,12 +24,14 @@ const logger = createLogger('audit');
 
 let _auditBuffer: AuditRecord[] = [];
 let _flushTimer: NodeJS.Timeout | null = null;
+let _db: Database | null = null;
 
 const FLUSH_INTERVAL_MS = 5000; // 5 seconds
 const MAX_BUFFER_SIZE = 50;
 
-export function startAuditBuffer() {
+export function startAuditBuffer(db?: Database) {
   if (_flushTimer) return;
+  if (db) _db = db;
   _flushTimer = setInterval(() => flushAuditBuffer(), FLUSH_INTERVAL_MS);
 }
 
@@ -45,8 +49,36 @@ async function flushAuditBuffer() {
   const records = [..._auditBuffer];
   _auditBuffer = [];
 
-  // In production: INSERT into audit_log table
-  // For now, log to structured logger
+  // Write to database if available
+  if (_db) {
+    try {
+      for (const record of records) {
+        await _db.insert(auditLogTable).values({
+          auditId: record.auditId,
+          staffUserId: record.staffUserId,
+          staffRole: record.staffRole,
+          action: record.action,
+          targetType: record.targetType,
+          targetId: record.targetId,
+          workspaceId: record.workspaceId ?? null,
+          reason: record.reason || null,
+          ticketRef: record.ticketRef ?? null,
+          requestId: record.requestId,
+          ipAddress: record.ipAddress ?? null,
+          userAgent: record.userAgent ?? null,
+          details: record.details ?? null,
+          occurredAt: record.occurredAt,
+        });
+      }
+    } catch (err) {
+      logger.error('Failed to write audit records to database', {
+        error: err instanceof Error ? err.message : 'Unknown error',
+        recordCount: records.length,
+      });
+    }
+  }
+
+  // Always log to structured logger as fallback
   for (const record of records) {
     logger.info('AUDIT', {
       auditId: record.auditId,

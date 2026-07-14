@@ -37,7 +37,12 @@ export type AuditAction =
   // Support actions
   | 'support.ticket_view'
   | 'support.workspace_inspect'
-  | 'support.audit_view';
+  | 'support.audit_view'
+  // Staff management actions
+  | 'staff.create'
+  | 'staff.promote'
+  | 'staff.demote'
+  | 'staff.revoke';
 
 // ── Audit Record ───────────────────────────────────────────────
 
@@ -51,7 +56,7 @@ export interface AuditRecord {
   /** Action performed */
   action: AuditAction;
   /** Target resource type */
-  targetType: 'workspace' | 'creator' | 'feature_flag' | 'queue' | 'ledger' | 'impersonation' | 'support';
+  targetType: 'workspace' | 'creator' | 'feature_flag' | 'queue' | 'ledger' | 'impersonation' | 'support' | 'staff';
   /** Target resource ID */
   targetId: string;
   /** Workspace ID if action is workspace-scoped */

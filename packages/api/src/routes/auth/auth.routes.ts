@@ -70,6 +70,46 @@ function isAuthCircuitOpen(): boolean {
   return false; // half-open: allow one request through
 }
 
+// ── IP-Based Rate Limiting for Auth Endpoints ────────────────
+
+interface LoginAttempt {
+  count: number;
+  windowStart: number;
+}
+
+const loginAttempts = new Map<string, LoginAttempt>();
+const LOGIN_RATE_LIMIT = 5; // max attempts per window
+const LOGIN_RATE_WINDOW_MS = 60_000; // 1 minute
+
+function checkLoginRateLimit(ip: string): { allowed: boolean; retryAfterMs: number } {
+  const now = Date.now();
+  const attempt = loginAttempts.get(ip);
+
+  if (!attempt || now - attempt.windowStart > LOGIN_RATE_WINDOW_MS) {
+    loginAttempts.set(ip, { count: 1, windowStart: now });
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
+  attempt.count++;
+
+  if (attempt.count > LOGIN_RATE_LIMIT) {
+    const retryAfterMs = LOGIN_RATE_WINDOW_MS - (now - attempt.windowStart);
+    return { allowed: false, retryAfterMs };
+  }
+
+  return { allowed: true, retryAfterMs: 0 };
+}
+
+// Cleanup old entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, attempt] of loginAttempts.entries()) {
+    if (now - attempt.windowStart > LOGIN_RATE_WINDOW_MS) {
+      loginAttempts.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000);
+
 // ── Route Factory ────────────────────────────────────────────
 
 export function createAuthRoutes(config: AuthConfig): Hono {
@@ -88,7 +128,42 @@ export function createAuthRoutes(config: AuthConfig): Hono {
    */
   routes.post('/login', async (c) => {
     const requestId = c.get('requestId');
-    const body = await c.req.json();
+
+    // IP-based rate limiting (TD-07)
+    const clientIp = c.req.header('x-forwarded-for')?.split(',')[0]?.trim()
+      ?? c.req.header('x-real-ip')
+      ?? 'unknown';
+    const rateLimit = checkLoginRateLimit(clientIp);
+    if (!rateLimit.allowed) {
+      return c.json(
+        {
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'Too many login attempts. Please try again later.',
+            retry_after_ms: rateLimit.retryAfterMs,
+            request_id: requestId,
+          },
+        },
+        429,
+      );
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid JSON in request body',
+            request_id: requestId,
+          },
+        },
+        400,
+      );
+    }
+
     const { email, password } = body ?? {};
 
     if (!email || !password) {
@@ -120,7 +195,7 @@ export function createAuthRoutes(config: AuthConfig): Hono {
       );
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email as string, password: password as string });
 
     if (error) {
       recordAuthFailure();
@@ -160,7 +235,23 @@ export function createAuthRoutes(config: AuthConfig): Hono {
    */
   routes.post('/signup', async (c) => {
     const requestId = c.get('requestId');
-    const body = await c.req.json();
+
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid JSON in request body',
+            request_id: requestId,
+          },
+        },
+        400,
+      );
+    }
+
     const { email, password, name } = body ?? {};
 
     if (!email || !password) {
@@ -178,8 +269,8 @@ export function createAuthRoutes(config: AuthConfig): Hono {
 
     const supabase = getClient();
     const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
+      email: email as string,
+      password: password as string,
       options: name ? { data: { full_name: name } } : undefined,
     });
 
@@ -295,7 +386,23 @@ export function createAuthRoutes(config: AuthConfig): Hono {
    */
   routes.post('/refresh', async (c) => {
     const requestId = c.get('requestId');
-    const body = await c.req.json();
+
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid JSON in request body',
+            request_id: requestId,
+          },
+        },
+        400,
+      );
+    }
+
     const { refresh_token } = body ?? {};
 
     if (!refresh_token) {
@@ -312,7 +419,7 @@ export function createAuthRoutes(config: AuthConfig): Hono {
     }
 
     const supabase = getClient();
-    const { data, error } = await supabase.auth.refreshSession({ refresh_token });
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: refresh_token as string });
 
     if (error || !data.session) {
       return c.json(
