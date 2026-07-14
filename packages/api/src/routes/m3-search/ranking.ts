@@ -2,7 +2,17 @@
  * Deterministic Ranking (Doc 15 B3, FS-02.03).
  * Identical query + index state = identical results.
  * All factors are precomputed GCP attributes — zero LLM at query time (ADR-018).
+ *
+ * Extended with:
+ * - rising_score: exploration layer for newly rising creators
+ * - pakistanDefaultBoost: workspace-aware PK-first discovery
  */
+
+// ── Feature Flags (environment variables) ────────────────────
+
+const RISING_SCORE_ENABLED = process.env['RISING_SCORE_ENABLED'] !== 'false';
+const PAKISTAN_BOOST_ENABLED = process.env['PAKISTAN_BOOST_ENABLED'] !== 'false';
+const PAKISTAN_BOOST_WEIGHT = parseFloat(process.env['PAKISTAN_BOOST_WEIGHT'] ?? '0.05');
 
 // ── Ranking Weights (configurable, flag-tunable) ─────────────
 
@@ -13,16 +23,45 @@ export interface RankingWeights {
   qualityScore: number;
   freshnessDecay: number;
   longTailFairness: number;
+  risingScore: number;
 }
 
 export const DEFAULT_RANKING_WEIGHTS: RankingWeights = {
-  relevance: 0.25,
-  criteriaMatch: 0.20,
-  authenticityWeight: 0.20,
-  qualityScore: 0.15,
-  freshnessDecay: 0.10,
+  relevance: 0.22,
+  criteriaMatch: 0.18,
+  authenticityWeight: 0.18,
+  qualityScore: 0.13,
+  freshnessDecay: 0.09,
   longTailFairness: 0.10,
+  risingScore: 0.10,
 };
+
+// ── Pakistan Boost Config ────────────────────────────────────
+
+interface PakistanBoostConfig {
+  enabled: boolean;
+  baseWeight: number;
+  strongNicheMultiplier: number;
+  weakNicheMultiplier: number;
+}
+
+const DEFAULT_PAKISTAN_BOOST: PakistanBoostConfig = {
+  enabled: PAKISTAN_BOOST_ENABLED,
+  baseWeight: PAKISTAN_BOOST_WEIGHT,
+  strongNicheMultiplier: 1.5,
+  weakNicheMultiplier: 0.5,
+};
+
+// PK-strong niches (DOC-018 Part H)
+const PK_STRONG_NICHES = [
+  'pk_fashion_textile',
+  'pk_food_street_culture',
+  'pk_politics_commentary',
+  'pk_drama_entertainment',
+  'pk_tech_startups',
+  'pk_agriculture_rural',
+  'pk_diaspora_content',
+];
 
 // ── Follower Bands (T5 long-tail fairness) ───────────────────
 
@@ -112,6 +151,41 @@ function computeCriteriaMatch(
   return matchCount / filterKeys.length;
 }
 
+/**
+ * Pakistan-first boost — workspace-aware, niche-aware.
+ * Additive signal (not weighted) to keep independent of main ranking formula.
+ */
+function computePakistanBoost(
+  creatorNiche: string,
+  workspaceGeo: string | undefined,
+  config: PakistanBoostConfig = DEFAULT_PAKISTAN_BOOST,
+): { score: number; reason: string } {
+  if (!config.enabled) return { score: 0, reason: 'disabled' };
+
+  const isStrongNiche = PK_STRONG_NICHES.includes(creatorNiche);
+  const isPakistanWorkspace = workspaceGeo === 'PK';
+
+  if (isPakistanWorkspace && isStrongNiche) {
+    return {
+      score: config.baseWeight * config.strongNicheMultiplier,
+      reason: 'PK workspace + strong niche',
+    };
+  }
+  if (isPakistanWorkspace && !isStrongNiche) {
+    return {
+      score: config.baseWeight * config.weakNicheMultiplier,
+      reason: 'PK workspace',
+    };
+  }
+  if (!isPakistanWorkspace && isStrongNiche) {
+    return {
+      score: config.baseWeight * 0.75,
+      reason: 'PK niche',
+    };
+  }
+  return { score: 0, reason: '' };
+}
+
 // ── Ranking Explanation (CC-001) ─────────────────────────────
 
 export interface RankingExplanation {
@@ -121,6 +195,8 @@ export interface RankingExplanation {
   qualityScore: { score: number; weight: number };
   freshnessDecay: { score: number; weight: number };
   longTailFairness: { score: number; weight: number };
+  risingScore: { score: number; weight: number };
+  pakistanBoost: { score: number; weight: number; reason: string };
   totalScore: number;
 }
 
@@ -128,6 +204,13 @@ export interface RankedHit {
   [key: string]: unknown;
   _rankingScore: number;
   _explanation: RankingExplanation;
+}
+
+// ── Ranking Context ──────────────────────────────────────────
+
+export interface RankingContext {
+  weights?: RankingWeights;
+  workspaceGeo?: string;
 }
 
 // ── Main Ranking Function ────────────────────────────────────
@@ -139,8 +222,15 @@ export interface RankedHit {
 export function rankHits(
   hits: unknown[],
   filters: Record<string, unknown>,
-  weights: RankingWeights = DEFAULT_RANKING_WEIGHTS,
+  ctx: RankingContext = {},
 ): RankedHit[] {
+  const weights = ctx.weights ?? DEFAULT_RANKING_WEIGHTS;
+
+  // If rising_score is disabled, zero out its weight
+  const effectiveWeights = RISING_SCORE_ENABLED
+    ? weights
+    : { ...weights, risingScore: 0 };
+
   return hits
     .map((hit) => {
       const h = hit as Record<string, unknown>;
@@ -151,22 +241,33 @@ export function rankHits(
       const qualityScore = ((h['qualityScore'] as number) ?? 0) / 100; // Normalize 0-100 → 0-1
       const freshnessScore = computeFreshnessDecay(h['lastEnrichedAt'] as string | null);
       const fairnessScore = computeLongTailFairness((h['followerCount'] as number) ?? 0);
+      const risingScoreVal = (h['risingScore'] as number) ?? 0;
+
+      // Pakistan boost (additive, not weighted)
+      const pakistanBoost = computePakistanBoost(
+        (h['primaryNiche'] as string) ?? '',
+        ctx.workspaceGeo,
+      );
 
       const totalScore =
-        relevanceScore * weights.relevance +
-        criteriaScore * weights.criteriaMatch +
-        authenticityScore * weights.authenticityWeight +
-        qualityScore * weights.qualityScore +
-        freshnessScore * weights.freshnessDecay +
-        fairnessScore * weights.longTailFairness;
+        relevanceScore * effectiveWeights.relevance +
+        criteriaScore * effectiveWeights.criteriaMatch +
+        authenticityScore * effectiveWeights.authenticityWeight +
+        qualityScore * effectiveWeights.qualityScore +
+        freshnessScore * effectiveWeights.freshnessDecay +
+        fairnessScore * effectiveWeights.longTailFairness +
+        risingScoreVal * effectiveWeights.risingScore +
+        pakistanBoost.score; // Additive
 
       const explanation: RankingExplanation = {
-        relevance: { score: relevanceScore, weight: weights.relevance },
-        criteriaMatch: { score: criteriaScore, weight: weights.criteriaMatch },
-        authenticityWeight: { score: authenticityScore, weight: weights.authenticityWeight },
-        qualityScore: { score: qualityScore, weight: weights.qualityScore },
-        freshnessDecay: { score: freshnessScore, weight: weights.freshnessDecay },
-        longTailFairness: { score: fairnessScore, weight: weights.longTailFairness },
+        relevance: { score: relevanceScore, weight: effectiveWeights.relevance },
+        criteriaMatch: { score: criteriaScore, weight: effectiveWeights.criteriaMatch },
+        authenticityWeight: { score: authenticityScore, weight: effectiveWeights.authenticityWeight },
+        qualityScore: { score: qualityScore, weight: effectiveWeights.qualityScore },
+        freshnessDecay: { score: freshnessScore, weight: effectiveWeights.freshnessDecay },
+        longTailFairness: { score: fairnessScore, weight: effectiveWeights.longTailFairness },
+        risingScore: { score: risingScoreVal, weight: effectiveWeights.risingScore },
+        pakistanBoost: { score: pakistanBoost.score, weight: 1, reason: pakistanBoost.reason },
         totalScore,
       };
 
