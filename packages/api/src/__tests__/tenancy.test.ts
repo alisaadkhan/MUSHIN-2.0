@@ -154,9 +154,18 @@ describe('tenancyMiddleware', () => {
     const payload = createMockJWTPayload();
     vi.mocked(jwtVerify).mockResolvedValue({ payload } as any);
     vi.mocked(workspaceRepository.getMembership).mockResolvedValue({
-      status: 'suspended',
+      membershipId: 'mem-001',
+      workspaceId: 'ws-123',
+      userId: 'test-user-id',
       role: 'member',
-    });
+      status: 'suspended',
+      invitedEmail: null,
+      invitedBy: null,
+      invitedAt: null,
+      joinedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
 
     const middleware = tenancyMiddleware({
       jwksUri: 'https://auth.mushin.io/.well-known/jwks.json',
@@ -185,12 +194,21 @@ describe('tenancyMiddleware', () => {
     const payload = createMockJWTPayload();
     vi.mocked(jwtVerify).mockResolvedValue({ payload } as any);
     vi.mocked(workspaceRepository.getMembership).mockResolvedValue({
-      status: 'active',
+      membershipId: 'mem-001',
+      workspaceId: 'ws-123',
+      userId: 'test-user-id',
       role: 'member',
-    });
+      status: 'active',
+      invitedEmail: null,
+      invitedBy: null,
+      invitedAt: null,
+      joinedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
     vi.mocked(workspaceRepository.findById).mockResolvedValue({
       workspace: { subscriptionPlanId: 'free' },
-    });
+    } as any);
 
     // Mock db.execute for RLS context
     mockDb.execute = vi.fn().mockResolvedValue([]);

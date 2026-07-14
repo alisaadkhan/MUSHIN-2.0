@@ -34,7 +34,7 @@ describe('Middleware Exports', () => {
 
   it('auditLog returns a middleware function', async () => {
     const mod = await import('../middleware/audit-log.js');
-    const middleware = mod.auditLog('workspace.create', 'workspace');
+    const middleware = mod.auditLog('workspace.view', 'workspace');
     expect(typeof middleware).toBe('function');
   });
 
@@ -75,7 +75,7 @@ describe('Route Exports', () => {
 
   it('createM3Routes returns a Hono app', async () => {
     const mod = await import('../routes/m3-search/index.js');
-    const routes = mod.createM3Routes({} as any, {} as any);
+    const routes = mod.createM3Routes({} as any, {} as any, {} as any);
     expect(routes).toBeDefined();
     expect(typeof routes.fetch).toBe('function');
   });

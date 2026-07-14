@@ -89,6 +89,7 @@ describe('creditRepository', () => {
   describe('reserveCredits', () => {
     it('should return success with new balance when sufficient credits', async () => {
       const mockDb = {
+        $client: { sql: () => {} },
         execute: vi.fn()
           .mockResolvedValueOnce([{ balance: 1000n, version: 1 }])
           .mockResolvedValueOnce([]),
@@ -112,6 +113,7 @@ describe('creditRepository', () => {
 
     it('should return failure when insufficient credits', async () => {
       const mockDb = {
+        $client: { sql: () => {} },
         execute: vi.fn().mockResolvedValueOnce([{ balance: 50n, version: 1 }]),
       };
 
@@ -129,6 +131,7 @@ describe('creditRepository', () => {
 
     it('should return failure when no balance row exists', async () => {
       const mockDb = {
+        $client: { sql: () => {} },
         execute: vi.fn().mockResolvedValueOnce([]),
       };
 
@@ -147,6 +150,7 @@ describe('creditRepository', () => {
     it('should insert ledger entry and return current balance', async () => {
       // commitCredits calls insertLedgerEntry (db.insert) then getBalance (db.select)
       const mockDb = {
+        $client: { sql: () => {} },
         insert: vi.fn().mockReturnValue({
           values: vi.fn().mockResolvedValue([]),
         }),
@@ -171,6 +175,7 @@ describe('creditRepository', () => {
   describe('releaseCredits', () => {
     it('should update balance and insert ledger entry', async () => {
       const mockDb = {
+        $client: { sql: () => {} },
         execute: vi.fn()
           .mockResolvedValueOnce([{ balance: 900n, version: 1 }]) // SELECT FOR UPDATE
           .mockResolvedValueOnce([]), // UPDATE balance
@@ -191,6 +196,7 @@ describe('creditRepository', () => {
   describe('grantCredits', () => {
     it('should update balance and insert ledger entry', async () => {
       const mockDb = {
+        $client: { sql: () => {} },
         execute: vi.fn()
           .mockResolvedValueOnce([{ balance: 500n, version: 1 }]) // SELECT FOR UPDATE
           .mockResolvedValueOnce([]), // UPDATE balance
@@ -211,6 +217,7 @@ describe('creditRepository', () => {
   describe('expireCredits', () => {
     it('should update balance and insert ledger entry', async () => {
       const mockDb = {
+        $client: { sql: () => {} },
         execute: vi.fn()
           .mockResolvedValueOnce([{ balance: 500n, version: 1 }]) // SELECT FOR UPDATE
           .mockResolvedValueOnce([]), // UPDATE balance
@@ -231,6 +238,7 @@ describe('creditRepository', () => {
   describe('expireStaleReservations', () => {
     it('should find and release stale reservations', async () => {
       const mockDb = {
+        $client: { sql: () => {} },
         execute: vi.fn()
           .mockResolvedValueOnce([{ reservation_id: 'res-001', workspace_id: 'ws-001', amount: 100n }]) // Find stale
           .mockResolvedValueOnce([]), // Release

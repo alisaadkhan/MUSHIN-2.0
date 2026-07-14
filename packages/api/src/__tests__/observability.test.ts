@@ -130,7 +130,7 @@ describe('Health Checks', () => {
 
     const result = await runHealthChecks();
     expect(result.checks['test-check']).toBeDefined();
-    expect(result.checks['test-check'].status).toBe('healthy');
+    expect(result.checks['test-check']!.status).toBe('healthy');
   });
 
   it('should handle failing health checks', async () => {
@@ -139,7 +139,7 @@ describe('Health Checks', () => {
     });
 
     const result = await runHealthChecks();
-    expect(result.checks['failing-check'].status).toBe('unhealthy');
+    expect(result.checks['failing-check']!.status).toBe('unhealthy');
     expect(result.status).toBe('unhealthy');
   });
 

@@ -142,6 +142,12 @@ describe('Meilisearch Provider Validation', () => {
       audienceDiasporaShare: null,
       languageMix: null,
       summary: null,
+      audienceFemalePercent: null,
+      audienceMalePercent: null,
+      audienceAgeBands: null,
+      audienceCities: null,
+      audienceCountries: null,
+      risingScore: null,
       completenessTier: 'minimal',
       enrichmentSource: 'user_submitted',
       lastEnrichedAt: null,
@@ -356,6 +362,7 @@ describe('SQS Provider Validation', () => {
       actorType: 'user',
       actorId: 'user-001',
       correlationId: 'corr-001',
+      causationId: null,
       payload: {},
       occurredAt: new Date(),
     });
@@ -389,7 +396,7 @@ describe('Monitoring Provider Validation', () => {
     logger.info('test message');
 
     expect(spy).toHaveBeenCalled();
-    const output = JSON.parse(spy.mock.calls[0][0]);
+    const output = JSON.parse(spy.mock.calls[0]![0] as string);
     expect(output.ts).toBeDefined();
     expect(output.service).toBe('test');
 
@@ -404,7 +411,7 @@ describe('Monitoring Provider Validation', () => {
 
     logger.info('test', { password: 'secret', api_key: 'key' });
 
-    const output = JSON.parse(spy.mock.calls[0][0]);
+    const output = JSON.parse(spy.mock.calls[0]![0] as string);
     expect(output.password).toBe('[REDACTED]');
     expect(output.api_key).toBe('[REDACTED]');
 
@@ -419,7 +426,7 @@ describe('Monitoring Provider Validation', () => {
 
     logger.info('test', { email: 'user@example.com' });
 
-    const output = JSON.parse(spy.mock.calls[0][0]);
+    const output = JSON.parse(spy.mock.calls[0]![0] as string);
     expect(output.email).toMatch(/^\[PSEUDO:[a-f0-9]+\]$/);
 
     vi.restoreAllMocks();

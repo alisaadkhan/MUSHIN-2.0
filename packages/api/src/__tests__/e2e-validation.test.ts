@@ -349,6 +349,7 @@ describe('Event Flow E2E', () => {
       actorType: 'user',
       actorId: 'user-001',
       correlationId: 'corr-001',
+      causationId: null,
       payload: {},
       occurredAt: new Date(),
     });
@@ -380,7 +381,7 @@ describe('Structured Logger E2E', () => {
     logger.info('test message', { request_id: 'req-001' });
 
     expect(spy).toHaveBeenCalled();
-    const output = JSON.parse(spy.mock.calls[0][0]);
+    const output = JSON.parse(spy.mock.calls[0]![0] as string);
     expect(output.ts).toBeDefined();
     expect(output.service).toBe('test');
     expect(output.level).toBe('info');
@@ -399,7 +400,7 @@ describe('Structured Logger E2E', () => {
 
     logger.info('test', { password: 'secret123', api_key: 'key-abc' });
 
-    const output = JSON.parse(spy.mock.calls[0][0]);
+    const output = JSON.parse(spy.mock.calls[0]![0] as string);
     expect(output.password).toBe('[REDACTED]');
     expect(output.api_key).toBe('[REDACTED]');
 
