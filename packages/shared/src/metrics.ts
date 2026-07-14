@@ -110,6 +110,98 @@ export function flushMetrics(): MetricValue[] {
   return metrics;
 }
 
+// ── Periodic Metrics Export to Axiom ───────────────────────────
+
+let _metricsFlushTimer: NodeJS.Timeout | null = null;
+const METRICS_FLUSH_INTERVAL_MS = 30_000; // 30 seconds
+
+/**
+ * Start periodic metrics flush to Axiom.
+ * Call once at server startup after initAxiom().
+ */
+export function startMetricsExport(): void {
+  const token = process.env['AXIOM_TOKEN'];
+  const dataset = process.env['AXIOM_DATASET'];
+
+  if (!token || !dataset) {
+    logger.info('Axiom not configured — metrics export disabled');
+    return;
+  }
+
+  _metricsFlushTimer = setInterval(async () => {
+    const metrics = flushMetrics();
+    if (metrics.length === 0) return;
+
+    try {
+      const response = await fetch(`https://api.axiom.co/v1/datasets/${dataset}/ingest`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'X-Axiom-Source': 'mushin-metrics',
+        },
+        body: JSON.stringify(metrics.map(m => ({
+          _time: m.timestamp?.toISOString(),
+          metric_name: m.name,
+          metric_type: m.type,
+          metric_value: m.value,
+          ...m.attributes,
+        }))),
+      });
+
+      if (!response.ok) {
+        logger.warn('Metrics export failed', { status: response.status });
+      }
+    } catch (err) {
+      logger.warn('Metrics export error', { error: err instanceof Error ? err.message : 'unknown' });
+    }
+  }, METRICS_FLUSH_INTERVAL_MS);
+
+  // Flush on process exit
+  process.on('exit', () => {
+    const remaining = flushMetrics();
+    if (remaining.length > 0) {
+      try {
+        const token = process.env['AXIOM_TOKEN'];
+        const dataset = process.env['AXIOM_DATASET'];
+        if (token && dataset) {
+          const body = JSON.stringify(remaining.map(m => ({
+            _time: m.timestamp?.toISOString(),
+            metric_name: m.name,
+            metric_type: m.type,
+            metric_value: m.value,
+            ...m.attributes,
+          })));
+          const XHR = (globalThis as any).XMLHttpRequest;
+          if (XHR) {
+            const xhr = new XHR();
+            xhr.open('POST', `https://api.axiom.co/v1/datasets/${dataset}/ingest`, false);
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.send(body);
+          }
+        }
+      } catch {
+        // Best effort on exit
+      }
+    }
+  });
+
+  logger.info('Metrics export started', { interval_ms: METRICS_FLUSH_INTERVAL_MS });
+}
+
+/**
+ * Stop periodic metrics flush.
+ */
+export function stopMetricsExport(): void {
+  if (_metricsFlushTimer) {
+    clearInterval(_metricsFlushTimer);
+    _metricsFlushTimer = null;
+  }
+  // Final flush
+  flushMetrics();
+}
+
 // ── Structured Metric Emission (DOC-023 §2.2) ─────────────────
 
 /** Credits metrics */

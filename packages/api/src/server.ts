@@ -6,12 +6,16 @@
  */
 import { serve } from '@hono/node-server';
 import { createApp } from './index.js';
-import { createLogger } from '@mushin/shared';
+import { createLogger, initAxiom, shutdownAxiom, startMetricsExport, stopMetricsExport } from '@mushin/shared';
 
 const logger = createLogger('api:server');
 
 async function main() {
   const port = Number(process.env['PORT'] ?? 3000);
+
+  // Initialize observability (Axiom logs + metrics export)
+  initAxiom();
+  startMetricsExport();
 
   const app = createApp();
 
@@ -32,6 +36,10 @@ async function main() {
 
     logger.info(`Received ${signal}, shutting down gracefully...`);
 
+    // Flush observability data before exit
+    stopMetricsExport();
+    shutdownAxiom();
+
     server.close(() => {
       logger.info('HTTP server closed');
       process.exit(0);
@@ -46,9 +54,24 @@ async function main() {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+
+  // Prevent crashes from unhandled errors in request handlers
+  process.on('unhandledRejection', (err) => {
+    logger.error('Unhandled rejection', undefined, err instanceof Error ? err : undefined);
+  });
+
+  process.on('uncaughtException', (err) => {
+    logger.error('Uncaught exception', undefined, err);
+    // Don't exit — let the server continue serving other requests
+  });
 }
 
 main().catch((err) => {
   logger.error('Failed to start server', err);
+  if (err instanceof Error) {
+    console.error('Error name:', err.name);
+    console.error('Error message:', err.message);
+    console.error('Error stack:', err.stack);
+  }
   process.exit(1);
 });

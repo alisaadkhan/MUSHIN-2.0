@@ -316,6 +316,14 @@ export class MeilisearchAdapter {
         'audiencePkShare',
         'audienceGccShare',
         'completenessTier',
+        // Demographic filters (Problem 3)
+        'audienceFemalePercent',
+        'audienceMalePercent',
+        'audienceAgeBands',
+        'audienceCities',
+        'audienceCountries',
+        // Rising score (Problem 1)
+        'risingScore',
       ],
       sortableAttributes: [
         'followerCount',
@@ -324,6 +332,8 @@ export class MeilisearchAdapter {
         'authenticityScore',
         'freshnessScore',
         'lastEnrichedAt',
+        // Rising score (Problem 1)
+        'risingScore',
       ],
       searchableAttributes: [
         'displayName',
@@ -439,6 +449,16 @@ export interface MeilisearchDocument {
   audienceDiasporaShare: number | null;
   languageMix: Record<string, number> | null;
   summary: string | null;
+
+  // Demographics (Problem 3)
+  audienceFemalePercent: number | null;
+  audienceMalePercent: number | null;
+  audienceAgeBands: Record<string, number> | null;
+  audienceCities: Record<string, number> | null;
+  audienceCountries: Record<string, number> | null;
+
+  // Rising score (Problem 1)
+  risingScore: number | null;
 
   // Completeness
   completenessTier: string;

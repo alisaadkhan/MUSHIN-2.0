@@ -6,6 +6,7 @@ export { initSentry, captureError, captureMessage, setTag, setUser } from './sen
 export { initAxiom, shutdownAxiom } from './axiom.js';
 export {
   incrementCounter, setGauge, recordHistogram, flushMetrics,
+  startMetricsExport, stopMetricsExport,
   emitCreditReserved, emitCreditSettled, emitCreditSwept,
   emitQueueDepth, emitQueueOldestMessage, emitDLQDepth,
   emitAdapterCall, emitAdapterError, emitCircuitState,

@@ -294,20 +294,25 @@ export class OutreachService {
     eventType: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
+    // ADR-020: outbox write MUST be in the same DB transaction as the state change.
+    // Wrap event emission in a transaction for atomicity.
+    // Non-fatal: if event emission fails, log and continue (email was already sent).
     try {
-      await emitEvent(this.db as Parameters<typeof emitEvent>[0], {
-        eventId: crypto.randomUUID(),
-        type: eventType,
-        schemaVersion: 1,
-        scopeClass: 'WP',
-        workspaceId,
-        actor: { type: 'user', id: 'current-user' },
-        correlationId: crypto.randomUUID(),
-        occurredAt: new Date(),
-        payload: { creatorId, ...payload },
+      await this.db.transaction(async (tx) => {
+        await emitEvent(tx as Parameters<typeof emitEvent>[0], {
+          eventId: crypto.randomUUID(),
+          type: eventType,
+          schemaVersion: 1,
+          scopeClass: 'WP',
+          workspaceId,
+          actor: { type: 'user', id: 'current-user' },
+          correlationId: crypto.randomUUID(),
+          occurredAt: new Date(),
+          payload: { creatorId, ...payload },
+        });
       });
     } catch (err) {
-      console.warn('[Outreach] Failed to emit event:', err);
+      console.warn('[Outreach] Failed to emit event (non-fatal):', err);
     }
   }
 }

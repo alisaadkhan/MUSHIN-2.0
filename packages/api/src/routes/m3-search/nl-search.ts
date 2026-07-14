@@ -2,12 +2,18 @@
  * M3 Search — Natural Language Search (FS-02.02, NFR-P02).
  * Brain 1 with LLM translation: NL query → T-A → structured filters → Meilisearch.
  * Interpretation cache: normalized-query → interpretation, 24h TTL.
+ *
+ * Extended with demographic filters (Problem 3).
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { TenancyContext } from '@mushin/shared';
 import type { MeilisearchAdapter, LLMAdapter } from '@mushin/adapters';
-import { rankHits, DEFAULT_RANKING_WEIGHTS } from './ranking.js';
+import { rankHits, DEFAULT_RANKING_WEIGHTS, type RankingContext } from './ranking.js';
+
+// ── Feature Flags ────────────────────────────────────────────
+
+const DEMOGRAPHIC_FILTERS_ENABLED = process.env['DEMOGRAPHIC_FILTERS_ENABLED'] !== 'false';
 
 // ── NL Query Schema ──────────────────────────────────────────
 
@@ -17,20 +23,33 @@ const nlSearchSchema = z.object({
 
 // ── Filter Output Schema (what the LLM must return) ──────────
 
+const baseLlmFilters = z.object({
+  platform: z.string().optional(),
+  follower_min: z.number().optional(),
+  follower_max: z.number().optional(),
+  engagement_rate_min: z.number().optional(),
+  engagement_rate_max: z.number().optional(),
+  geo: z.string().optional(),
+  language: z.string().optional(),
+  niche: z.string().optional(),
+  authenticity_band: z.string().optional(),
+  audience_pk_share_min: z.number().optional(),
+  audience_gcc_share_min: z.number().optional(),
+});
+
+const demographicLlmFilters = DEMOGRAPHIC_FILTERS_ENABLED
+  ? z.object({
+      audience_female_percent_min: z.number().optional(),
+      audience_male_percent_min: z.number().optional(),
+      audience_age_band: z.enum(['18-24', '25-34', '35-44', '45+']).optional(),
+      audience_age_band_min: z.number().optional(),
+      audience_city: z.string().optional(),
+      audience_country: z.string().optional(),
+    })
+  : z.object({});
+
 const llmFilterOutputSchema = z.object({
-  filters: z.object({
-    platform: z.string().optional(),
-    follower_min: z.number().optional(),
-    follower_max: z.number().optional(),
-    engagement_rate_min: z.number().optional(),
-    engagement_rate_max: z.number().optional(),
-    geo: z.string().optional(),
-    language: z.string().optional(),
-    niche: z.string().optional(),
-    authenticity_band: z.string().optional(),
-    audience_pk_share_min: z.number().optional(),
-    audience_gcc_share_min: z.number().optional(),
-  }),
+  filters: baseLlmFilters.merge(demographicLlmFilters),
   chips: z.array(
     z.object({
       label: z.string(),
@@ -71,22 +90,44 @@ function getCachedInterpretation(normalizedQuery: string): CachedInterpretation 
 
 // ── Meilisearch Filter Builder ───────────────────────────────
 
+const DEMOGRAPHIC_CONFIDENCE_THRESHOLD = 0.1;
+
+/** Sanitize a string value for safe interpolation into Meilisearch filter expressions */
+function sanitizeFilterValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 function buildMeilisearchFilter(filters: Record<string, unknown>): string[] {
   const parts: string[] = [];
-  if (filters['platform']) parts.push(`platform = "${filters['platform']}"`);
+  if (filters['platform']) parts.push(`platform = "${sanitizeFilterValue(filters['platform'] as string)}"`);
   if (filters['follower_min'] !== undefined) parts.push(`followerCount >= ${filters['follower_min']}`);
   if (filters['follower_max'] !== undefined) parts.push(`followerCount <= ${filters['follower_max']}`);
   if (filters['engagement_rate_min'] !== undefined)
     parts.push(`engagementRate >= ${filters['engagement_rate_min']}`);
   if (filters['engagement_rate_max'] !== undefined)
     parts.push(`engagementRate <= ${filters['engagement_rate_max']}`);
-  if (filters['niche']) parts.push(`primaryNiche = "${filters['niche']}"`);
+  if (filters['niche']) parts.push(`primaryNiche = "${sanitizeFilterValue(filters['niche'] as string)}"`);
   if (filters['authenticity_band'])
-    parts.push(`authenticityBand = "${filters['authenticity_band']}"`);
+    parts.push(`authenticityBand = "${sanitizeFilterValue(filters['authenticity_band'] as string)}"`);
   if (filters['audience_pk_share_min'] !== undefined)
     parts.push(`audiencePkShare >= ${filters['audience_pk_share_min']}`);
   if (filters['audience_gcc_share_min'] !== undefined)
     parts.push(`audienceGccShare >= ${filters['audience_gcc_share_min']}`);
+
+  // Demographic filters
+  if (DEMOGRAPHIC_FILTERS_ENABLED) {
+    if (filters['audience_female_percent_min'] !== undefined)
+      parts.push(`audienceFemalePercent >= ${filters['audience_female_percent_min']}`);
+    if (filters['audience_male_percent_min'] !== undefined)
+      parts.push(`audienceMalePercent >= ${filters['audience_male_percent_min']}`);
+    if (filters['audience_age_band'] && filters['audience_age_band_min'] !== undefined)
+      parts.push(`audienceAgeBands.${filters['audience_age_band']} >= ${filters['audience_age_band_min']}`);
+    if (filters['audience_city'])
+      parts.push(`audienceCities.${sanitizeFilterValue(filters['audience_city'] as string)} >= ${DEMOGRAPHIC_CONFIDENCE_THRESHOLD}`);
+    if (filters['audience_country'])
+      parts.push(`audienceCountries.${sanitizeFilterValue(filters['audience_country'] as string)} >= ${DEMOGRAPHIC_CONFIDENCE_THRESHOLD}`);
+  }
+
   return parts;
 }
 
@@ -126,6 +167,11 @@ export function createNLSearchRoutes(
     const { query } = parsed.data;
     const normalized = normalizeQuery(query);
 
+    // Build ranking context with workspace geo
+    const rankingCtx: RankingContext = {
+      weights: DEFAULT_RANKING_WEIGHTS,
+    };
+
     // Check interpretation cache (zero-token path)
     const cached = getCachedInterpretation(normalized);
     if (cached) {
@@ -144,13 +190,21 @@ export function createNLSearchRoutes(
           confidence: cached.confidence,
           cached: true,
         },
-        results: rankHits(hits, cached.filters, DEFAULT_RANKING_WEIGHTS),
+        results: rankHits(hits, cached.filters, rankingCtx),
         total: hits.length,
         meta: { request_id: requestId },
       });
     }
 
     // Translate NL → filters via T-A LLM
+    const demographicPrompt = DEMOGRAPHIC_FILTERS_ENABLED ? `
+- audience_female_percent_min: float 0-100 (minimum % female audience)
+- audience_male_percent_min: float 0-100 (minimum % male audience)
+- audience_age_band: "18-24" | "25-34" | "35-44" | "45+"
+- audience_age_band_min: float 0-1 (minimum % in age band)
+- audience_city: city name (e.g. "Karachi", "Lahore", "Dubai")
+- audience_country: country name (e.g. "Pakistan", "UAE", "UK")` : '';
+
     const systemPrompt = `You are a search query translator for an influencer marketing platform.
 Convert natural language queries into structured search filters.
 
@@ -163,6 +217,7 @@ Available filters:
 - niche: niche slug (e.g. "pk_fashion_textile", "beauty_skincare", "tech_gadgets")
 - authenticity_band: "strong" | "moderate" | "weak"
 - audience_pk_share_min, audience_gcc_share_min: float 0-1
+${demographicPrompt}
 
 Return JSON matching this schema:
 { "filters": {...}, "chips": [{ "label": "...", "value": "...", "field": "..." }], "confidence": 0.0-1.0 }
@@ -173,7 +228,7 @@ Only include filters that are explicitly stated or strongly implied.`;
       systemPrompt,
       query,
       llmFilterOutputSchema,
-      { temperature: 0, maxTokens: 500, promptRegistryId: 'nl_query_translator:v1' },
+      { temperature: 0, maxTokens: 500, promptRegistryId: 'nl_query_translator:v2' },
     );
 
     let translation: LLMFilterOutput;
@@ -189,7 +244,7 @@ Only include filters that are explicitly stated or strongly implied.`;
           cached: false,
           fallback: true,
         },
-        results: rankHits(hits, {}, DEFAULT_RANKING_WEIGHTS),
+        results: rankHits(hits, {}, rankingCtx),
         total: hits.length,
         meta: { request_id: requestId },
       });
@@ -222,7 +277,7 @@ Only include filters that are explicitly stated or strongly implied.`;
         confidence: translation.confidence,
         cached: false,
       },
-      results: rankHits(hits, translation.filters, DEFAULT_RANKING_WEIGHTS),
+      results: rankHits(hits, translation.filters, rankingCtx),
       total: hits.length,
       meta: { request_id: requestId },
     });
